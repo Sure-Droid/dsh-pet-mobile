@@ -161,5 +161,66 @@
     hud();
   }
 
+  // ---------- 4) 长按 = 右键菜单 ----------
+  // 插件原版的级联菜单（对话 / 查看余额 / 动作点播 / 回到初始位置 / 重载配置）就是**右键菜单**，
+  // 手机没有右键：长按 550ms 在触点处派发一个 contextmenu，插件自己的监听器就会把菜单弹出来。
+  // 只在宠物身体上长按才触发（菜单/对话面板里的长按不受影响）。
+  var pressTimer = null;
+  var pressX = 0;
+  var pressY = 0;
+  function cancelPress() {
+    if (pressTimer) {
+      clearTimeout(pressTimer);
+      pressTimer = null;
+    }
+  }
+  document.addEventListener(
+    'touchstart',
+    function (e) {
+      if (!e.touches || e.touches.length !== 1) return;
+      var target = e.target;
+      if (!target || !target.closest || !target.closest('.pet-hit')) return;
+      var t = e.touches[0];
+      pressX = t.clientX;
+      pressY = t.clientY;
+      cancelPress();
+      pressTimer = setTimeout(function () {
+        pressTimer = null;
+        var el = document.elementFromPoint(pressX, pressY) || target;
+        try {
+          el.dispatchEvent(
+            new MouseEvent('contextmenu', {
+              bubbles: true,
+              cancelable: true,
+              clientX: pressX,
+              clientY: pressY,
+              button: 2,
+              buttons: 2,
+            }),
+          );
+        } catch (err) {
+          noteError('contextmenu 派发失败: ' + err);
+        }
+        try {
+          if (navigator.vibrate) navigator.vibrate(15); // 轻微震动反馈（设备支持才震）
+        } catch (err) {
+          /* 忽略 */
+        }
+      }, 550);
+    },
+    { capture: true, passive: true },
+  );
+  document.addEventListener(
+    'touchmove',
+    function (e) {
+      if (!pressTimer || !e.touches || e.touches.length !== 1) return;
+      var t = e.touches[0];
+      if (Math.abs(t.clientX - pressX) > 12 || Math.abs(t.clientY - pressY) > 12) cancelPress(); // 手指动了 = 拖拽，不是长按
+    },
+    { capture: true, passive: true },
+  );
+  document.addEventListener('touchend', cancelPress, { capture: true, passive: true });
+  document.addEventListener('touchcancel', cancelPress, { capture: true, passive: true });
+
   document.addEventListener('contextmenu', function (e) { e.preventDefault(); }, true);
 })();

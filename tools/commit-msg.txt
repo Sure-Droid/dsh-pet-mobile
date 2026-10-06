@@ -1,12 +1,13 @@
-fix(mobile): 撤掉 viewport meta（它把布局宽度改成设备宽度，宠物被放到窗口外 → 整只看不见）
+feat(mobile): 模型设置界面（填 Key + 测试连接）与「长按 = 右键菜单」
 
-上一版加的 <meta name="viewport" content="width=device-width,..."> 让 WebView 把布局宽度
-变成设备宽度（约 393 CSS px），而窗口宽 924 CSS px、渲染端按注入的 workArea 算位置 ——
-两套坐标错位，宠物被摆到窗口之外，表现为完全看不到。
+阶段 A（手机直连模型的前置）：
+- 新增 Llm.java：纯 HttpURLConnection + org.json 实现 DeepSeek 直连，
+  chat(/chat/completions) 与 balance(/user/balance)，异常消息与出参一律把 sk- 密钥擦成 sk-***，
+  全阻塞、不碰 UI。
+- MainActivity 增加「模型（手机直连）」区块：API Key（密码样式、永不回显）、Base URL、模型名，
+  「保存」与「测试连接」（后台线程请求，成功显示余额，失败显示脱敏后的错误）。
 
-布局宽度本来就由 PetService 的 setUseWideViewPort(true) + setInitialScale 控制，页面保持原样即可。
-
-本次保留的改动：
-- touch-action: none（治"点不动、拖不动"）
-- 自检 HUD（开头 12 秒显示 pointerdown/move/up/cancel 计数，异常时常驻）
-- 肥鱼图标（上一版已带上）
+长按 = 右键菜单（手机没有右键）：
+- tools/mobile-boot.js 在宠物身体上长按 550ms，于触点派发 contextmenu，
+  插件原版级联菜单（对话 / 查看余额 / 动作点播 / 回到初始位置 / 重载配置）由此可用；
+  手指移动超过 12px 即取消（那是拖拽），并带一次轻微震动反馈。
