@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+  <!-- 悬浮在其他应用上层（特殊权限，要在设置里手动授予） -->
+  <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+  <!-- 前台服务（宠物常驻） -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+  <!-- 本地素材服务（127.0.0.1）与将来的 PC 连接 -->
+  <uses-permission android:name="android.permission.INTERNET" />
+
+  <application
+      android:label="dsh-pet"
+      android:usesCleartextTraffic="true"
+      android:hardwareAccelerated="true"
+      android:theme="@android:style/Theme.DeviceDefault">
+
+    <activity
+        android:name=".MainActivity"
+        android:exported="true"
+        android:label="dsh-pet 手机版">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+      </intent-filter>
+    </activity>
+
+    <service
+        android:name=".PetService"
+        android:exported="false"
+        android:foregroundServiceType="specialUse">
+      <property
+          android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+          android:value="floating desktop pet overlay" />
+    </service>
+  </application>
+</manifest>

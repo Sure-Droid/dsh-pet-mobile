@@ -1,0 +1,47 @@
+// dsh-pet 手机版（Android 悬浮桌宠）
+//
+// 设计取向：**一行不改地复用插件自己的渲染端**（runtime/electron-helper 的
+// shared-core/constants/sprite/events/renderer），Android 侧只做三件事：
+//   1. 一个悬浮窗（TYPE_APPLICATION_OVERLAY），窗口尺寸/位置完全照渲染端上报的
+//      petBridge.setBounds(x, y, width, height, ...) 来设（与 Electron 主进程同一公式）；
+//   2. 一个只绑 127.0.0.1 的本地小 HTTP 服务，把打包进 assets 的素材按宿主原来的
+//      URL 结构（/dsh-pet-7340/thumb/main/x.webm 等）回给 WebView —— 这样渲染端
+//      连 URL 拼装都不用改；
+//   3. petBridge 的 JS 接口（setBounds/setInteractive 等）。
+plugins {
+  id 'com.android.application'
+}
+
+android {
+  namespace 'com.dshpet.mobile'
+  compileSdk 34
+
+  defaultConfig {
+    applicationId 'com.dshpet.mobile'
+    minSdk 24
+    targetSdk 34
+    versionCode 1
+    versionName '0.1.0'
+  }
+
+  // 动画是 webm/png/ttf：再压缩没意义，还会拖慢构建
+  androidResources {
+    noCompress += ['webm', 'png', 'ttf']
+  }
+
+  buildTypes {
+    release {
+      minifyEnabled false
+      // 自己用：直接用 debug 签名，省掉 keystore 配置
+      signingConfig signingConfigs.debug
+    }
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+}
+
+// 刻意不用任何依赖（包括 AndroidX）：少一层解析，构建更快、更不容易炸
+dependencies { }

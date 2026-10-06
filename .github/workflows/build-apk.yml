@@ -1,0 +1,49 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: 安装需要的 SDK 组件
+        run: sdkmanager --install "platforms;android-34" "build-tools;34.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: 构建 debug APK
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: 上传 APK（Actions 里可直接下载）
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-pet-mobile-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: 顺便发一个 Release（手机上点链接就能装）
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="apk-$(date +%Y%m%d-%H%M%S)"
+          gh release create "$tag" app/build/outputs/apk/debug/app-debug.apk \
+            --title "dsh-pet 手机版 $tag" \
+            --notes "自动构建的安装包（debug 签名，自己用足够）。手机浏览器点下面的 .apk 直接下载安装即可。"

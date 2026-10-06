@@ -1,0 +1,4 @@
+// dsh-pet 手机版：根构建脚本（只有一个 AGP 插件声明）
+plugins {
+  id 'com.android.application' version '8.5.2' apply false
+}
