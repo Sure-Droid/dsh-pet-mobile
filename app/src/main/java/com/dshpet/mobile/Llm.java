@@ -55,9 +55,9 @@ public class Llm {
     public String model = DEFAULT_MODEL;
     public int timeoutMs = DEFAULT_TIMEOUT_MS;
 
-    /** 能不能发请求：要有 Key，也要有个像样的 Base URL */
+    /** 能不能发请求：要有 Key（清洗后还剩东西才算），也要有个像样的 Base URL */
     public boolean isConfigured() {
-      return apiKey != null && apiKey.trim().length() > 0
+      return sanitizeKey(apiKey).length() > 0
           && baseUrl != null && baseUrl.trim().length() > 0;
     }
   }
@@ -70,7 +70,7 @@ public class Llm {
   public static Settings load(Context c) {
     SharedPreferences p = c.getSharedPreferences(MainActivity.PREFS, Context.MODE_PRIVATE);
     Settings s = new Settings();
-    s.apiKey = p.getString(KEY_API_KEY, "");
+    s.apiKey = sanitizeKey(p.getString(KEY_API_KEY, "")); // 历史版本可能存进过空白/引号，读出来也过一遍
     s.baseUrl = p.getString(KEY_BASE_URL, DEFAULT_BASE_URL);
     s.model = p.getString(KEY_MODEL, DEFAULT_MODEL);
     s.timeoutMs = p.getInt(KEY_TIMEOUT_MS, DEFAULT_TIMEOUT_MS);
@@ -84,7 +84,7 @@ public class Llm {
   /** 存偏好：只写这三项（超时固定默认值，界面暂时不暴露它） */
   public static void save(Context c, String apiKey, String baseUrl, String model) {
     SharedPreferences.Editor e = c.getSharedPreferences(MainActivity.PREFS, Context.MODE_PRIVATE).edit();
-    e.putString(KEY_API_KEY, apiKey == null ? "" : apiKey.trim());
+    e.putString(KEY_API_KEY, sanitizeKey(apiKey));
     e.putString(KEY_BASE_URL, (baseUrl == null || baseUrl.trim().isEmpty()) ? DEFAULT_BASE_URL : baseUrl.trim());
     e.putString(KEY_MODEL, (model == null || model.trim().isEmpty()) ? DEFAULT_MODEL : model.trim());
     e.apply();
@@ -93,7 +93,7 @@ public class Llm {
   /** 拿界面上的三个输入框拼一份配置（Key 空着就沿用已保存的那把） */
   public static Settings toSettings(String apiKey, String baseUrl, String model, int timeoutMs) {
     Settings s = new Settings();
-    s.apiKey = apiKey == null ? "" : apiKey.trim();
+    s.apiKey = sanitizeKey(apiKey);
     s.baseUrl = (baseUrl == null || baseUrl.trim().isEmpty()) ? DEFAULT_BASE_URL : baseUrl.trim();
     s.model = (model == null || model.trim().isEmpty()) ? DEFAULT_MODEL : model.trim();
     s.timeoutMs = timeoutMs > 0 ? timeoutMs : DEFAULT_TIMEOUT_MS;
@@ -212,7 +212,8 @@ public class Llm {
       conn.setRequestMethod(method);
       conn.setConnectTimeout(s.timeoutMs);
       conn.setReadTimeout(s.timeoutMs);
-      conn.setRequestProperty("Authorization", "Bearer " + s.apiKey.trim());
+      // 兜底再洗一次：Settings 的字段是包内可见的，别人可能直接塞了个脏 key 进来
+      conn.setRequestProperty("Authorization", "Bearer " + sanitizeKey(s.apiKey));
       conn.setRequestProperty("Accept", "application/json");
 
       if (jsonBody != null) {
@@ -298,6 +299,64 @@ public class Llm {
   public static String mask(String s) {
     if (s == null) return "";
     return SECRET.matcher(s).replaceAll("sk-***");
+  }
+
+  // ------------------------------------------------------------------ 密钥清洗与指纹
+
+  /**
+   * 把用户粘进来的东西洗成"能直接塞进 Authorization 头"的 key。
+   *
+   * 现实里最常见的翻车方式就是"看起来一样、其实不一样"：从聊天窗/网页复制的 key 尾巴上
+   * 带一个换行、前后多了空格、被复制成了 `"sk-xxx"`（带引号或中文引号）、或者干脆连
+   * `Bearer ` 前缀一起复制进来了。界面上 key 是密码样式，用户根本看不出多了什么。
+   *
+   * 规则：先跳过前导杂字符，若紧跟着是 `Bearer`（大小写不敏感）就摘掉；
+   * 然后**只保留 `[A-Za-z0-9._-]`**（DeepSeek 的 key 就是 `sk-` + 字母数字），
+   * 其余（所有空白、U+00A0 不间断空格、U+200B/U+FEFF 零宽字符、英文/中文引号、其它符号）
+   * 一律丢弃。
+   *
+   * @param raw 用户输入或历史偏好里的原文，可为 null
+   * @return 清洗后的 key；raw 为 null（或全是垃圾字符）时返回 ""
+   */
+  public static String sanitizeKey(String raw) {
+    if (raw == null) return "";
+    int start = 0;
+    // 前导的空白/引号/零宽字符等都跳过，再看是不是 Bearer 前缀
+    while (start < raw.length() && !isKeyChar(raw.charAt(start))) start++;
+    if (raw.regionMatches(true, start, "Bearer", 0, 6)) start += 6;
+    StringBuilder out = new StringBuilder(raw.length());
+    for (int i = start; i < raw.length(); i++) {
+      char ch = raw.charAt(i);
+      if (isKeyChar(ch)) out.append(ch);
+    }
+    return out.toString();
+  }
+
+  /** key 的白名单字符：字母、数字、点、下划线、连字符（`-` 在字符类里要转义，这里不用正则所以无所谓） */
+  private static boolean isKeyChar(char c) {
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+        || c == '.' || c == '_' || c == '-';
+  }
+
+  /**
+   * 给用户看的一行诊断：**只讲形状，不讲密钥本体**。
+   *
+   * 例：`Key 长度 35 · 前缀 sk- · 已清洗掉 2 个非法字符`
+   *   - 长度取清洗后的长度；
+   *   - 清洗后以 `sk-` 开头才显示 `sk-`，否则显示异常提示；
+   *   - "已清洗掉 N 个" = 原串长度 − 清洗后长度（N 为 0 时这段不显示）。
+   * 原串为空返回 `未填写 Key`。返回值里最多出现 key 的前 3 个字符（也就是 `sk-`），
+   * 其余任何情况下都不含密钥内容 —— 这一行会直接显示在界面/截图里。
+   */
+  public static String keyFingerprint(String rawKey) {
+    if (rawKey == null || rawKey.isEmpty()) return "未填写 Key";
+    String clean = sanitizeKey(rawKey);
+    StringBuilder sb = new StringBuilder();
+    sb.append("Key 长度 ").append(clean.length());
+    sb.append(" · 前缀 ").append(clean.startsWith("sk-") ? "sk-" : "异常（不是 sk- 开头）");
+    int dropped = rawKey.length() - clean.length();
+    if (dropped > 0) sb.append(" · 已清洗掉 ").append(dropped).append(" 个非法字符");
+    return sb.toString();
   }
 
   private static String truncate(String s, int max) {

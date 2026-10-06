@@ -11,6 +11,8 @@ import android.provider.Settings;
 import android.text.InputType;
 import android.view.View;
 import android.widget.Button;
+import android.widget.CheckBox;
+import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -40,6 +42,7 @@ public class MainActivity extends Activity {
   // ---- 模型（手机直连）区块 ----
   private TextView modelStatus;
   private EditText keyInput;
+  private CheckBox showKeyCheck;
   private EditText baseUrlInput;
   private EditText modelInput;
   private Button saveModelButton;
@@ -149,7 +152,25 @@ public class MainActivity extends Activity {
     keyInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
     keyInput.setHint("DeepSeek API Key（sk-...）");
     keyInput.setSingleLine(true);
-    root.addView(keyInput);
+
+    // 「显示」：key 是密码样式，用户看不见自己到底输了什么（尾巴多个空格、多个引号就白折腾），
+    // 勾上临时切成明文，自己核对一眼开头/结尾有没有混进怪字符。默认不勾。
+    showKeyCheck = new CheckBox(this);
+    showKeyCheck.setText("显示");
+    showKeyCheck.setChecked(false);
+    showKeyCheck.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+      @Override
+      public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+        toggleKeyVisible(isChecked);
+      }
+    });
+
+    LinearLayout keyRow = new LinearLayout(this);
+    keyRow.setOrientation(LinearLayout.HORIZONTAL);
+    keyRow.addView(keyInput, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+    keyRow.addView(showKeyCheck, new LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+    root.addView(keyRow);
 
     baseUrlInput = new EditText(this);
     baseUrlInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
@@ -284,24 +305,52 @@ public class MainActivity extends Activity {
     if (keyInput != null) keyInput.setText(""); // 刻意不回显
   }
 
-  /** 状态行：只显示"配没配 + 用的哪个地址/模型"，永不显示 key 本身 */
+  /** 状态行：只显示"配没配 + 用的哪个地址/模型"，再附一行不含密钥本体的指纹（长度/前缀/洗掉了几个怪字符） */
   private void refreshModelStatus() {
     if (modelStatus == null) return;
     if (savedSettings == null || !savedSettings.isConfigured()) {
       modelStatus.setText("未配置 —— 填 Key 后点「保存」");
       return;
     }
-    modelStatus.setText("已配置 ✓ " + savedSettings.model + " @ " + savedSettings.baseUrl);
+    modelStatus.setText("已配置 ✓ " + savedSettings.model + " @ " + savedSettings.baseUrl
+        + "\n" + Llm.keyFingerprint(savedSettings.apiKey));
   }
 
-  /** 保存：Key 输入框为空则保留原 key 不变 */
+  /** 勾/取消「显示」：只换输入类型；切完光标会被顶到末尾，所以自己记住原位置再放回去 */
+  private void toggleKeyVisible(boolean visible) {
+    if (keyInput == null) return;
+    int sel = keyInput.getSelectionStart();
+    if (sel < 0) sel = keyInput.getText().length();
+    keyInput.setInputType(visible
+        ? InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+        : InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+    keyInput.setSingleLine(true);
+    keyInput.setSelection(Math.min(sel, keyInput.getText().length()));
+  }
+
+  /**
+   * 保存：Key 输入框为空则保留原 key 不变；但"填了东西却一个有效字符都留不下"（只输了空格/
+   * 零宽字符/引号）时整条不保存 —— 免得把之前存好的那把 key 冲掉，也让用户看得见问题。
+   */
   private void saveModelSettings() {
     String keyIn = text(keyInput);
+    String keyRaw = rawKeyInput(); // 原样（不 trim）：指纹要靠它数出被丢掉的怪字符
     String base = text(baseUrlInput);
     String model = text(modelInput);
 
+    if (!keyRaw.isEmpty() && Llm.sanitizeKey(keyRaw).isEmpty()) {
+      if (modelStatus != null) {
+        modelStatus.setText("未保存：Key 里没有有效字符（只保留了字母数字和 - _ .）"
+            + "\n" + Llm.keyFingerprint(keyRaw));
+      }
+      return;
+    }
+
     Llm.Settings loaded = Llm.load(this);
     String key = keyIn.isEmpty() ? loaded.apiKey : keyIn;
+    // 指纹在清空输入框之前算：用户填过就按他填的原串算，这样"混进了几个怪字符"才看得出来
+    String fp = Llm.keyFingerprint(keyRaw.isEmpty() ? key : keyRaw);
+
     Llm.save(this, key, base.isEmpty() ? Llm.DEFAULT_BASE_URL : base, model.isEmpty() ? Llm.DEFAULT_MODEL : model);
     savedSettings = Llm.load(this);
 
@@ -313,16 +362,32 @@ public class MainActivity extends Activity {
     }
     if (keyInput != null) keyInput.setText(""); // 存完就清空，屏幕上不留密钥
 
-    if (modelStatus != null) modelStatus.setText(savedSettings.isConfigured() ? "已保存 ✓" : "已保存 ✓（还没有 Key，测试会失败）");
+    if (modelStatus != null) {
+      modelStatus.setText((savedSettings.isConfigured() ? "已保存 ✓" : "已保存 ✓（还没有 Key，测试会失败）")
+          + "\n" + fp);
+    }
   }
 
   /**
    * 测试连接：后台线程 GET /user/balance，结果回主线程显示。
    * 优先级是"输入框 > 已保存"——所以填完不保存直接测也能用。
+   * 状态行一律附上 key 指纹：截图一张就能同时看到"报什么错"和"key 存成了什么形状"。
    */
   private void testConnection() {
     final Llm.Settings loaded = Llm.load(this);
     final String keyIn = text(keyInput);
+    final String keyRaw = rawKeyInput();
+    final String fp = Llm.keyFingerprint(keyRaw.isEmpty() ? loaded.apiKey : keyRaw);
+
+    // 输入框里只有怪字符：一个有效字符都没有，别拿"已保存的旧 key"测通了让人误会
+    if (!keyRaw.isEmpty() && Llm.sanitizeKey(keyRaw).isEmpty()) {
+      if (modelStatus != null) {
+        modelStatus.setText("还没配置 API Key —— Key 里没有有效字符（只保留了字母数字和 - _ .）"
+            + "\n" + fp);
+      }
+      return;
+    }
+
     final Llm.Settings s = Llm.toSettings(
         keyIn.isEmpty() ? loaded.apiKey : keyIn, // 空 = 不修改，用已保存的
         text(baseUrlInput),
@@ -330,11 +395,11 @@ public class MainActivity extends Activity {
         loaded.timeoutMs);
 
     if (!s.isConfigured()) {
-      if (modelStatus != null) modelStatus.setText("还没配置 API Key —— 填好 Key 后先点「保存」");
+      if (modelStatus != null) modelStatus.setText("还没配置 API Key —— 填好 Key 后先点「保存」\n" + fp);
       return;
     }
 
-    if (modelStatus != null) modelStatus.setText("测试中…");
+    if (modelStatus != null) modelStatus.setText("测试中…\n" + fp);
     if (testModelButton != null) testModelButton.setEnabled(false);
     if (saveModelButton != null) saveModelButton.setEnabled(false);
 
@@ -343,9 +408,9 @@ public class MainActivity extends Activity {
       public void run() {
         String result;
         try {
-          result = Llm.describeBalance(Llm.balance(s));
+          result = Llm.describeBalance(Llm.balance(s)) + "\n" + fp;
         } catch (final Exception e) {
-          result = "测试失败：" + shorten(e.getMessage());
+          result = "测试失败：" + shorten(e.getMessage()) + " ｜ " + fp;
         }
         final String shown = result;
         runOnUiThread(new Runnable() {
@@ -362,6 +427,11 @@ public class MainActivity extends Activity {
 
   private String text(EditText e) {
     return e == null ? "" : e.getText().toString().trim();
+  }
+
+  /** 输入框原文（不 trim）：用来数"用户到底多输了几个字符" */
+  private String rawKeyInput() {
+    return keyInput == null ? "" : keyInput.getText().toString();
   }
 
   /** 异常消息可能很长（而且可能夹着服务端回显）——先擦密钥，再截到 120 字 */
