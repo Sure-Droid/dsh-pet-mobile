@@ -13,9 +13,11 @@
  *      手机首发版不连 PC，开着只会对着不存在的宿主轮询报错。
  */
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
+/** 本脚本所在目录（tools/）—— mobile-boot.js 的唯一真源放在这里 */
+const PROJECT_TOOLS = dirname(fileURLToPath(import.meta.url));
 const PKG = 'D:\\DSH\\.dsh\\profiles\\desktop\\node_modules\\dsh-pet';
 const STANDALONE = 'D:\\deep seek\\dsh-pet-standalone\\src';
 const OUT = 'D:\\deep seek\\dsh-pet-mobile\\app\\src\\main\\assets\\pet';
@@ -37,7 +39,14 @@ if (!html.includes('mobile-boot.js')) {
     '<script src="./mobile-boot.js"></script>\n<script src="./shared-core.js"></script>',
   );
 }
+// 移动端视口：原页面没有 viewport meta（Electron 窗口不需要）；手机要禁掉双指缩放，
+// 否则缩放手势会抢走指针流，拖拽更难触发。
+if (!/name=["']viewport["']/i.test(html)) {
+  html = html.replace(/(<head[^>]*>)/i, '$1\n<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">');
+}
 writeFileSync(join(OUT, 'index.html'), html, 'utf8');
+// 引导脚本从 tools/ 拷进产物（保持唯一真源：手改 assets 里那份会在下次组装时被覆盖）
+cpSync(join(PROJECT_TOOLS, 'mobile-boot.js'), join(OUT, 'mobile-boot.js'));
 
 // ---- 2) 素材按宿主的 URL 结构摆放 ----
 const copyTree = (from, to) => {
