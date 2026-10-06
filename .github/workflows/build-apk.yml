@@ -36,9 +36,33 @@ jobs:
           gradle-version: '8.9'
 
       - name: 构建 debug APK
+        env:
+          # 固定签名（缺失时 build.gradle 自动回退到默认调试签名，不会失败）
+          DSHPET_KEYSTORE_BASE64: ${{ secrets.DSHPET_KEYSTORE_BASE64 }}
+          DSHPET_KEYSTORE_PASSWORD: ${{ secrets.DSHPET_KEYSTORE_PASSWORD }}
+          DSHPET_KEY_ALIAS: ${{ secrets.DSHPET_KEY_ALIAS }}
+          DSHPET_KEY_PASSWORD: ${{ secrets.DSHPET_KEY_PASSWORD }}
         run: |
           set -o pipefail
           gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee "$RUNNER_TEMP/build.log"
+
+      # 把 APK 的签名指纹发成 ::notice::（注解免登录可读）——
+      # 用来确认"这次构建到底用了固定签名还是默认调试签名"（两者指纹不同）
+      - name: 显示 APK 签名指纹
+        if: success()
+        run: |
+          APKS=$(ls app/build/outputs/apk/debug/*.apk | head -1)
+          SIGNER="$ANDROID_HOME/build-tools/34.0.0/apksigner"
+          [ -x "$SIGNER" ] || SIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | head -1)
+          if [ -x "$SIGNER" ]; then
+            SIG=$("$SIGNER" verify --print-certs "$APKS" 2>/dev/null | grep -m1 -i 'SHA-256 digest' || echo 'unknown')
+          else
+            SIG='apksigner 不可用'
+          fi
+          SUFFIX="（固定签名已启用）"
+          [ -n "$DSHPET_KEYSTORE_BASE64" ] || SUFFIX="（未配置固定签名，用的是默认调试签名）"
+          echo "::notice::APK 签名 $SIG $SUFFIX"
+          [ -n "$DSHPET_KEYSTORE_BASE64" ] || echo "::warning::未配置 DSHPET_KEYSTORE_BASE64 —— 本次 APK 不能覆盖安装"
 
       # Actions 的原始日志要登录才能下载；::error:: 会被 GitHub 变成"检查注解"，
       # 而注解是免登录可读的（这一条纯粹是为了让自动排障能拿到编译错误）

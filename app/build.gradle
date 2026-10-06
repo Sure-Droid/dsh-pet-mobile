@@ -12,9 +12,40 @@ plugins {
   id 'com.android.application'
 }
 
+// ---------------------------------------------------------------------------
+// 固定签名（可选但推荐）
+//   CI 通过仓库 secret 注入 keystore 的 base64 与口令；本地/未配置时**自动回退**到
+//   Android 默认调试签名，构建不会因为缺 secret 而失败。
+//   有了固定签名，CI 每次产出的 APK 签名一致 —— 手机上可以直接**覆盖安装**，
+//   不用卸载（否则每次都要重填 API Key 与设置）。
+// ---------------------------------------------------------------------------
+def dshpetKsB64 = System.getenv('DSHPET_KEYSTORE_BASE64')
+def dshpetKsPass = System.getenv('DSHPET_KEYSTORE_PASSWORD')
+def dshpetKsAlias = System.getenv('DSHPET_KEY_ALIAS')
+def dshpetKsKeyPass = System.getenv('DSHPET_KEY_PASSWORD') ?: dshpetKsPass
+def hasStableSigning = dshpetKsB64 && dshpetKsPass && dshpetKsAlias
+def dshpetKeystoreFile = null
+if (hasStableSigning) {
+  // 落在 build/ 下（.gitignore 已忽略），不会进仓库
+  dshpetKeystoreFile = file("$rootDir/build/dshpet-signing.p12")
+  dshpetKeystoreFile.parentFile.mkdirs()
+  dshpetKeystoreFile.bytes = java.util.Base64.getDecoder().decode(dshpetKsB64.replaceAll('\\s', ''))
+}
+
 android {
   namespace 'com.dshpet.mobile'
   compileSdk 34
+
+  signingConfigs {
+    if (hasStableSigning) {
+      stable {
+        storeFile dshpetKeystoreFile
+        storePassword dshpetKsPass
+        keyAlias dshpetKsAlias
+        keyPassword dshpetKsKeyPass
+      }
+    }
+  }
 
   defaultConfig {
     applicationId 'com.dshpet.mobile'
@@ -32,8 +63,19 @@ android {
   buildTypes {
     release {
       minifyEnabled false
-      // 自己用：直接用 debug 签名，省掉 keystore 配置
-      signingConfig signingConfigs.debug
+      // 自己用：没配固定签名时就用 debug 签名，省掉 keystore 配置
+      if (hasStableSigning) {
+        signingConfig signingConfigs.stable
+      } else {
+        signingConfig signingConfigs.debug
+      }
+    }
+    debug {
+      // 固定签名存在时，debug 包也用它 —— 这样每次 CI 产出的 APK 签名一致，
+      // 手机上**直接覆盖安装**即可，不用卸载（key 与设置都不会丢）。
+      if (hasStableSigning) {
+        signingConfig signingConfigs.stable
+      }
     }
   }
 
