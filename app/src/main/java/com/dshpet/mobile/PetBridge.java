@@ -31,9 +31,16 @@ public class PetBridge {
     service.onInteractive(interactive);
   }
 
+  /**
+   * 渲染端报告"此刻是否有输入框在等着打字"（对话面板打开、页面里有输入框获得焦点时为 true）。
+   *
+   * 在桌面版它决定"窗口是否可穿透"；手机版它的真实用途是**决定悬浮窗此刻是否可聚焦** ——
+   * 悬浮窗默认带 FLAG_NOT_FOCUSABLE（不抢其它应用焦点），代价是收不到键盘、输入法也不为它弹出；
+   * 所以需要输入时要临时去掉该 flag，输入结束再恢复（细节见 PetService.onInputBusy）。
+   */
   @JavascriptInterface
   public void setInputBusy(boolean busy) {
-    // 首版不区分：输入忙碌状态在桌面版用来决定"窗口是否可穿透"，手机版恒可交互
+    service.onInputBusy(busy);
   }
 
   @JavascriptInterface

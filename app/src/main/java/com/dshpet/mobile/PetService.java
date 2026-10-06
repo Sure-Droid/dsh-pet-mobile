@@ -53,6 +53,11 @@ public class PetService extends Service {
   private WebView webView;
   private LocalServer server;
 
+  /**
+   * 当前窗口是否处于"可聚焦"态（见 onInputBusy）。初始为 false：悬浮窗默认不抢焦点。
+   */
+  private boolean focusable = false;
+
   /** 物理像素 / 渲染端 CSS 单位 */
   private double unit = 1.0;
   private int lastX = Integer.MIN_VALUE;
@@ -97,11 +102,15 @@ public class PetService extends Service {
         ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         : WindowManager.LayoutParams.TYPE_PHONE;
 
+    // 初始 = 不可聚焦态：悬浮窗不抢其它应用的焦点（因此收不到键盘、输入法也不会弹出）。
+    // 需要打字时由 onInputBusy(true) 临时去掉 FLAG_NOT_FOCUSABLE。
+    // 这里显式带上 FLAG_NOT_TOUCH_MODAL：可聚焦态的 flags 里绝不能少了它（原因见 onInputBusy 注释）。
     params = new WindowManager.LayoutParams(
         (int) Math.round(windowCss * unit),
         (int) Math.round(windowCss * unit),
         type,
         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+            | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
             | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
             | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
         PixelFormat.TRANSLUCENT);
@@ -152,6 +161,7 @@ public class PetService extends Service {
       Log.w(TAG, "移除窗口失败: " + e.getMessage());
     }
     webView = null;
+    focusable = false; // 窗口没了，聚焦状态跟着复位
     if (server != null) server.stop();
     super.onDestroy();
   }
@@ -192,6 +202,61 @@ public class PetService extends Service {
    */
   void onInteractive(boolean interactive) {
     // 预留：将来可在此加 FLAG_NOT_TOUCHABLE 的"穿透模式"开关
+  }
+
+  /**
+   * 输入焦点开关：页面里有输入框要打字时，把悬浮窗临时切成"可聚焦"，打完字再切回去。
+   *
+   * 为什么需要它：悬浮窗为了避免抢走其它应用的焦点，初始 flags 里带了 FLAG_NOT_FOCUSABLE ——
+   * 这是悬浮窗的标准做法，但副作用是**本窗口收不到键盘输入，输入法也不会为它弹出**，
+   * 于是对话面板里的输入框永远打不了字（点上去毫无反应）。去掉这个 flag 才能恢复输入能力。
+   *
+   * 必须注意的坑（改动这里时务必保留）：
+   *   FLAG_NOT_TOUCH_MODAL 原本是**随 FLAG_NOT_FOCUSABLE 隐含生效**的 —— 不可聚焦的窗口默认不会吃掉
+   *   窗口矩形之外区域的触摸事件。一旦去掉 FLAG_NOT_FOCUSABLE，这层隐含行为就没了，窗口会连窗外区域的
+   *   触摸也一起拦截，整个屏幕都被挡住（表现像"卡死"）。所以可聚焦态的 flags 里**必须显式补上**
+   *   FLAG_NOT_TOUCH_MODAL，只让窗口内部接收触摸。
+   *
+   * 另外：本方法只允许改 flags 与 softInputMode，**绝不碰 params.x / y / width / height** ——
+   * 窗口的位置尺寸由渲染端逐帧上报的 petBridge.setBounds 控制，在这里动一下宠物就会跳位。
+   *
+   * 从 WebView 的 JS 线程进来（PetBridge.setInputBusy），统一 post 到主线程执行。
+   */
+  void onInputBusy(boolean busy) {
+    final boolean want = busy;
+    main.post(new Runnable() {
+      @Override
+      public void run() {
+        if (webView == null || params == null) return;
+        if (want == focusable) return; // 去重：状态没变化就不折腾窗口
+        focusable = want;
+        if (want) {
+          // 可聚焦态：没有 FLAG_NOT_FOCUSABLE；显式带上 FLAG_NOT_TOUCH_MODAL（原因见方法注释）
+          params.flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+              | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+              | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED;
+          // 输入法弹出时压缩窗口可用高度，渲染端据此重排（配合它的 resize 监听）
+          params.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE;
+        } else {
+          // 不可聚焦态：恢复初始 flags（不抢焦点、也不吃窗外触摸）
+          params.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+              | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+              | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+              | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED;
+          params.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED;
+        }
+        try {
+          windowManager.updateViewLayout(webView, params);
+        } catch (IllegalArgumentException e) {
+          Log.w(TAG, "updateViewLayout(inputBusy): " + e.getMessage());
+        }
+        if (want) {
+          // 让 WebView 真正拿到焦点，输入法才会被唤起（requestFocusFromTouch 兼顾触摸来源）
+          webView.requestFocus();
+          webView.requestFocusFromTouch();
+        }
+      }
+    });
   }
 
   /** 读 assets/pet/config.json 里的第一只宠物尺寸（拿不到就用插件的默认 462） */

@@ -44,7 +44,12 @@
       call('setInteractive', !!v);
     },
     setInputBusy: function (v) {
-      call('setInputBusy', !!v);
+      // 只要页面里有输入框处于焦点，就**不允许**把窗口降级为不可聚焦：
+      // 插件在对话面板打开期间可能再调一次 setInputBusy(false)，那会让悬浮窗立刻失去焦点、
+      // 输入法被收起（打字打到一半键盘消失）。这里以"页面里有没有输入焦点"为最高优先级。
+      var el = document.activeElement;
+      var typing = !!(el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable));
+      call('setInputBusy', typing ? true : !!v);
     },
     reportFlight: function (state) {
       call('reportFlight', JSON.stringify(state || null));
@@ -241,4 +246,23 @@
   document.addEventListener('touchcancel', cancelPress, { capture: true, passive: true });
 
   document.addEventListener('contextmenu', function (e) { e.preventDefault(); }, true);
+
+  // ---------- 5) 输入焦点观察 ----------
+  // 输入框获得/失去焦点时通知宿主切换"窗口可聚焦"，否则悬浮窗收不到键盘、输入法也不会弹出。
+  // 双保险：插件自己也会调 setInputBusy，但不能假设它一定在对话面板打开时调用。
+  function notifyInputBusy() {
+    var el = document.activeElement;
+    var typing = !!(el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable));
+    try {
+      if (window.petBridge && window.petBridge.setInputBusy) window.petBridge.setInputBusy(typing);
+    } catch (e) {}
+  }
+  document.addEventListener('focusin', notifyInputBusy, true);
+  document.addEventListener(
+    'focusout',
+    function () {
+      setTimeout(notifyInputBusy, 60);
+    },
+    true,
+  );
 })();
