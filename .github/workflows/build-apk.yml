@@ -40,16 +40,19 @@ jobs:
           set -o pipefail
           gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee "$RUNNER_TEMP/build.log"
 
-      # Actions 的原始日志要登录才能下载；把关键错误行汇总到 job summary 里就能免登录读到
-      - name: 失败时把编译错误写进 job summary
+      # Actions 的原始日志要登录才能下载；::error:: 会被 GitHub 变成"检查注解"，
+      # 而注解是免登录可读的（这一条纯粹是为了让自动排障能拿到编译错误）
+      - name: 失败时把编译错误发成 annotation
         if: failure()
         run: |
           {
             echo '## 构建失败：关键错误行'
             echo '```'
-            grep -nE "error:|What went wrong|Execution failed|> Task .* FAILED|\.java:[0-9]+|Cannot find symbol|symbol:|location:" "$RUNNER_TEMP/build.log" | head -100 || true
+            grep -nE "error:|Cannot find symbol|symbol:|location:|What went wrong|Execution failed|\.java:[0-9]+" "$RUNNER_TEMP/build.log" | head -60 || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          grep -E "error:|Cannot find symbol|symbol:|location:|What went wrong|Execution failed|\.java:[0-9]+" "$RUNNER_TEMP/build.log" \
+            | head -24 | while IFS= read -r line; do echo "::error::$line"; done
 
       - name: 上传 APK（Actions 里可直接下载）
         uses: actions/upload-artifact@v4
