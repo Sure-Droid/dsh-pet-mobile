@@ -7,6 +7,8 @@
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+  <!-- 长按触发菜单时的轻微震动反馈（WebView 里 navigator.vibrate 需要它） -->
+  <uses-permission android:name="android.permission.VIBRATE" />
   <!-- 本地素材服务（127.0.0.1）与将来的 PC 连接 -->
   <uses-permission android:name="android.permission.INTERNET" />
 

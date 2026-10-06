@@ -118,7 +118,7 @@
     var errs = (window.__dshPetDebug.errors || []).slice(-2).join(' | ');
     hudEl.textContent =
       'down ' + stats.down + '  move ' + stats.move + '  up ' + stats.up + '  cancel ' + stats.cancel +
-      '\ntouch ' + stats.touch + '  ' + stats.lastTarget +
+      '\nmenu ' + (stats.menu || 0) + '  touch ' + stats.touch + '  ' + stats.lastTarget +
       (errs ? '\n' + errs : '');
   }
 
@@ -162,45 +162,55 @@
   }
 
   // ---------- 4) 长按 = 右键菜单 ----------
-  // 插件原版的级联菜单（对话 / 查看余额 / 动作点播 / 回到初始位置 / 重载配置）就是**右键菜单**，
-  // 手机没有右键：长按 550ms 在触点处派发一个 contextmenu，插件自己的监听器就会把菜单弹出来。
-  // 只在宠物身体上长按才触发（菜单/对话面板里的长按不受影响）。
+  // 插件原版的级联菜单（对话 / 查看余额 / 碎碎念 / 动作点播 / 回到初始位置 / 重载配置）就是**右键菜单**。
+  //
+  // 两个坑（第一版正是栽在第二个上，表现是"长按完全没反应"）：
+  //   1. 派发目标必须是插件的命中区 `.pet-hit` —— contextmenu 监听挂在它身上，而且它是 z-index:1 的最上层；
+  //   2. **必须等手指抬起之后再派发**：插件 onContextMenu 的守卫是
+  //      `if (dragState.active || dragState.dragging || justDragged || menuOpen) return;`
+  //      而手指按着的时候 dragState.active 恒为 true —— 按着派发会被插件自己拦掉。
+  //      所以：长按到点先给震动反馈，抬手后隔一帧再派发（那时 dragState 已复位）。
   var pressTimer = null;
   var pressX = 0;
   var pressY = 0;
+  var longPressFired = false;
   function cancelPress() {
     if (pressTimer) {
       clearTimeout(pressTimer);
       pressTimer = null;
+    }
+    longPressFired = false;
+  }
+  function fireMenu() {
+    var hit = document.querySelector('.pet-hit') || document.elementFromPoint(pressX, pressY) || document.body;
+    try {
+      hit.dispatchEvent(
+        new MouseEvent('contextmenu', {
+          bubbles: true,
+          cancelable: true,
+          clientX: pressX,
+          clientY: pressY,
+          button: 2,
+          buttons: 2,
+        }),
+      );
+      stats.menu = (stats.menu || 0) + 1;
+      hud(); // 让 HUD 显示 menu 计数：能区分"派发了但菜单没弹"与"压根没派发"
+    } catch (err) {
+      noteError('contextmenu 派发失败: ' + err);
     }
   }
   document.addEventListener(
     'touchstart',
     function (e) {
       if (!e.touches || e.touches.length !== 1) return;
-      var target = e.target;
-      if (!target || !target.closest || !target.closest('.pet-hit')) return;
       var t = e.touches[0];
       pressX = t.clientX;
       pressY = t.clientY;
       cancelPress();
       pressTimer = setTimeout(function () {
         pressTimer = null;
-        var el = document.elementFromPoint(pressX, pressY) || target;
-        try {
-          el.dispatchEvent(
-            new MouseEvent('contextmenu', {
-              bubbles: true,
-              cancelable: true,
-              clientX: pressX,
-              clientY: pressY,
-              button: 2,
-              buttons: 2,
-            }),
-          );
-        } catch (err) {
-          noteError('contextmenu 派发失败: ' + err);
-        }
+        longPressFired = true; // 抬手时才真正派发
         try {
           if (navigator.vibrate) navigator.vibrate(15); // 轻微震动反馈（设备支持才震）
         } catch (err) {
@@ -219,7 +229,15 @@
     },
     { capture: true, passive: true },
   );
-  document.addEventListener('touchend', cancelPress, { capture: true, passive: true });
+  document.addEventListener(
+    'touchend',
+    function () {
+      var fired = longPressFired;
+      cancelPress();
+      if (fired) setTimeout(fireMenu, 60); // 等插件的 pointerup 跑完，dragState 复位后再派发
+    },
+    { capture: true, passive: true },
+  );
   document.addEventListener('touchcancel', cancelPress, { capture: true, passive: true });
 
   document.addEventListener('contextmenu', function (e) { e.preventDefault(); }, true);
