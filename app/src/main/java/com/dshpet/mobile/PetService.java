@@ -84,9 +84,12 @@ public class PetService extends Service {
     double marginCss = petCss * 0.5; // 与 shared-core 的 WINDOW_MARGIN_RATIO 一致：四周各半只
     double windowCss = petCss + marginCss * 2;
 
-    double targetPetPx = Math.min(dm.widthPixels, dm.heightPixels) * 0.30; // 宠物约占屏幕短边 30%
-    unit = targetPetPx / petCss;
-    double scale = unit / dm.density; // 传渲染端的页面缩放（Electron 侧是 setZoomFactor）
+    // 宠物占屏幕短边的百分比（App 界面里可调，默认 50%）
+    int petPercent = getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE)
+        .getInt(MainActivity.KEY_PET_PERCENT, MainActivity.PET_PERCENT_DEFAULT);
+    double targetPetPx = Math.min(dm.widthPixels, dm.heightPixels) * (petPercent / 100.0);
+    unit = targetPetPx / petCss; // 物理像素 / CSS 单位（= 页面缩放 × density）
+    double scale = unit / dm.density; // 传给渲染端的页面缩放（Electron 侧是 setZoomFactor）
     double workW = dm.widthPixels / unit;
     double workH = dm.heightPixels / unit;
 
@@ -114,6 +117,10 @@ public class PetService extends Service {
     settings.setDomStorageEnabled(true);
     settings.setMediaPlaybackRequiresUserGesture(false); // 关键：否则透明动画不会自动播
     settings.setAllowFileAccess(true);
+    // 关键：让**布局视口**等于窗口宽度（配合下面的 setInitialScale，使 1 CSS 单位 = unit 物理像素）。
+    // 少了它，WebView 会按"设备宽度"布局、再按 initialScale 缩放一次 —— 页面以为自己在很窄的
+    // 窗口里，而渲染端是按我们给的 workArea 算位置的，结果宠物被整体缩小好几倍（首版就是这个毛病）。
+    settings.setUseWideViewPort(true);
     webView.setInitialScale((int) Math.round(scale * 100));
     webView.addJavascriptInterface(new PetBridge(this), "petBridge");
 
