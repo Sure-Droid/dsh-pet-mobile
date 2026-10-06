@@ -36,7 +36,20 @@ jobs:
           gradle-version: '8.9'
 
       - name: 构建 debug APK
-        run: gradle assembleDebug --no-daemon --stacktrace
+        run: |
+          set -o pipefail
+          gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee "$RUNNER_TEMP/build.log"
+
+      # Actions 的原始日志要登录才能下载；把关键错误行汇总到 job summary 里就能免登录读到
+      - name: 失败时把编译错误写进 job summary
+        if: failure()
+        run: |
+          {
+            echo '## 构建失败：关键错误行'
+            echo '```'
+            grep -nE "error:|What went wrong|Execution failed|> Task .* FAILED|\.java:[0-9]+|Cannot find symbol|symbol:|location:" "$RUNNER_TEMP/build.log" | head -100 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: 上传 APK（Actions 里可直接下载）
         uses: actions/upload-artifact@v4
