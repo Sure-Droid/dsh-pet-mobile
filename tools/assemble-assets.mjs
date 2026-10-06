@@ -39,11 +39,10 @@ if (!html.includes('mobile-boot.js')) {
     '<script src="./mobile-boot.js"></script>\n<script src="./shared-core.js"></script>',
   );
 }
-// 移动端视口：原页面没有 viewport meta（Electron 窗口不需要）；手机要禁掉双指缩放，
-// 否则缩放手势会抢走指针流，拖拽更难触发。
-if (!/name=["']viewport["']/i.test(html)) {
-  html = html.replace(/(<head[^>]*>)/i, '$1\n<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">');
-}
+// 注意：**不要**给页面加 viewport meta。加 `width=device-width` 会把布局宽度改成"设备宽度"
+// （约 393 CSS 像素），而窗口是 924 CSS 像素宽、渲染端按我们注入的 workArea 算位置 ——
+// 两套坐标立刻错位，宠物会被放到窗口之外，表现为"整只都不见了"（v6 就是这样翻的车）。
+// 布局宽度由 PetService 的 setUseWideViewPort(true) + setInitialScale 控制，页面保持原样即可。
 writeFileSync(join(OUT, 'index.html'), html, 'utf8');
 // 引导脚本从 tools/ 拷进产物（保持唯一真源：手改 assets 里那份会在下次组装时被覆盖）
 cpSync(join(PROJECT_TOOLS, 'mobile-boot.js'), join(OUT, 'mobile-boot.js'));

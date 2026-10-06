@@ -1,0 +1,12 @@
+fix(mobile): 撤掉 viewport meta（它把布局宽度改成设备宽度，宠物被放到窗口外 → 整只看不见）
+
+上一版加的 <meta name="viewport" content="width=device-width,..."> 让 WebView 把布局宽度
+变成设备宽度（约 393 CSS px），而窗口宽 924 CSS px、渲染端按注入的 workArea 算位置 ——
+两套坐标错位，宠物被摆到窗口之外，表现为完全看不到。
+
+布局宽度本来就由 PetService 的 setUseWideViewPort(true) + setInitialScale 控制，页面保持原样即可。
+
+本次保留的改动：
+- touch-action: none（治"点不动、拖不动"）
+- 自检 HUD（开头 12 秒显示 pointerdown/move/up/cancel 计数，异常时常驻）
+- 肥鱼图标（上一版已带上）
