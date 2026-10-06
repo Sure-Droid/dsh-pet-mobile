@@ -42,6 +42,9 @@ public class Llm {
   /** 异常消息里最多保留多少字正文（状态码保留，正文截断） */
   private static final int ERR_BODY_LIMIT = 240;
 
+  /** 默认采样温度：与首版行为一致（桌面端碎碎念/对话用的是各自的 1，手机侧先保守） */
+  private static final double DEFAULT_TEMPERATURE = 0.8;
+
   /**
    * 一份"当前配置"的快照。字段是包内可见的（同包直接读写），外面也可以走
    * {@link #toSettings(String, String, String, int)} 造一份来试。
