@@ -50,7 +50,15 @@ jobs:
       # 用来确认"这次构建到底用了固定签名还是默认调试签名"（两者指纹不同）
       - name: 显示 APK 签名指纹
         if: success()
+        env:
+          # 必须在这里也注入一次：否则本步看不到这些变量，会永远报"未配置固定签名"
+          DSHPET_KEYSTORE_BASE64: ${{ secrets.DSHPET_KEYSTORE_BASE64 }}
+          DSHPET_KEYSTORE_PASSWORD: ${{ secrets.DSHPET_KEYSTORE_PASSWORD }}
+          DSHPET_KEY_ALIAS: ${{ secrets.DSHPET_KEY_ALIAS }}
+          DSHPET_KEY_PASSWORD: ${{ secrets.DSHPET_KEY_PASSWORD }}
         run: |
+          # 只报长度，不报内容：确认 4 个 secret 是否真的传进来了
+          echo "::notice::secret 长度 base64=${#DSHPET_KEYSTORE_BASE64} pass=${#DSHPET_KEYSTORE_PASSWORD} alias=${#DSHPET_KEY_ALIAS} keypass=${#DSHPET_KEY_PASSWORD}"
           APKS=$(ls app/build/outputs/apk/debug/*.apk | head -1)
           SIGNER="$ANDROID_HOME/build-tools/34.0.0/apksigner"
           [ -x "$SIGNER" ] || SIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | head -1)
@@ -59,8 +67,11 @@ jobs:
           else
             SIG='apksigner 不可用'
           fi
-          SUFFIX="（固定签名已启用）"
-          [ -n "$DSHPET_KEYSTORE_BASE64" ] || SUFFIX="（未配置固定签名，用的是默认调试签名）"
+          if [ -n "$DSHPET_KEYSTORE_BASE64" ] && [ -n "$DSHPET_KEYSTORE_PASSWORD" ] && [ -n "$DSHPET_KEY_ALIAS" ]; then
+            SUFFIX="（固定签名已启用）"
+          else
+            SUFFIX="（未配置固定签名，用的是默认调试签名）"
+          fi
           echo "::notice::APK 签名 $SIG $SUFFIX"
           [ -n "$DSHPET_KEYSTORE_BASE64" ] || echo "::warning::未配置 DSHPET_KEYSTORE_BASE64 —— 本次 APK 不能覆盖安装"
 
